@@ -344,6 +344,10 @@ public struct CloudKitAPI {
                 "value": .int(Int64(todoIncompletedCount)),
                 "type": .string("INT64"),
             ]),
+            "text": .dictionary([
+                "value": .null,
+                "type": .string("STRING"),
+            ]),
         ]
 
         var recordDict: [String: AnyCodableValue] = [
@@ -530,61 +534,33 @@ public struct CloudKitAPI {
 
     /// Create a fresh vector clock for a new record.
     private func makeVectorClock(device: String, counter: Int) -> String {
-        // Minimal binary plist: { "Bear CLI": counter }
-        // The format Bear uses is a bplist00 with the device name and an int counter.
-        // We replicate the exact pattern from Bear Web's output.
-        var data = Data()
-        // bplist00 header
-        data.append(contentsOf: [0x62, 0x70, 0x6C, 0x69, 0x73, 0x74, 0x30, 0x30])
-        // ASCII string object (type 0x50 + length)
-        let deviceBytes = Array(device.utf8)
-        data.append(UInt8(0x50 | (deviceBytes.count & 0x0F)))
-        data.append(contentsOf: deviceBytes)
-        // Int object (type 0x10 + value)
-        data.append(0x10)
-        data.append(UInt8(counter & 0xFF))
-        // Offset table and trailer (simplified)
-        let obj0Offset: UInt8 = 8
-        let obj1Offset = obj0Offset + 1 + UInt8(deviceBytes.count)
-        // Dict with 1 entry: key=obj0, value=obj1
-        data.append(0xD1) // dict with 1 entry
-        data.append(0x00) // key index
-        data.append(0x01) // value index
-        // Offset table
-        let offsetTableOffset = data.count
-        data.append(obj0Offset)
-        data.append(obj1Offset)
-        data.append(obj1Offset + 2) // dict offset
-        // Trailer (32 bytes)
-        data.append(contentsOf: [UInt8](repeating: 0, count: 18))
-        data.append(0x01) // offsetIntSize
-        data.append(0x01) // objectRefSize
-        data.append(contentsOf: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03]) // numObjects
-        data.append(contentsOf: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02]) // topObject index
-        let otBytes = withUnsafeBytes(of: UInt64(offsetTableOffset).bigEndian) { Array($0) }
-        data.append(contentsOf: otBytes)
+        let dict: [String: Any] = [device: counter]
+        guard let data = try? PropertyListSerialization.data(
+            fromPropertyList: dict, format: .binary, options: 0
+        ) else {
+            return ""
+        }
         return data.base64EncodedString()
     }
 
-    /// Increment the counter in an existing vector clock, or create a fresh one.
+    /// Increment the "Bear CLI" counter in an existing vector clock, preserving all other device entries.
     private func incrementVectorClock(_ base64: String) -> String {
-        // For simplicity, if we can't parse the existing clock, create a fresh one.
-        // The clock is a bplist with {"Device Name": counter}.
-        // We create a new clock with "Bear CLI" and counter = extracted + 1.
-        guard let data = Data(base64Encoded: base64), data.count > 20 else {
+        guard let data = Data(base64Encoded: base64),
+              var dict = (try? PropertyListSerialization.propertyList(
+                  from: data, options: [], format: nil
+              )) as? [String: Any] else {
             return makeVectorClock(device: "Bear CLI", counter: 1)
         }
 
-        // Try to find the counter byte (it follows 0x10 pattern)
-        // The counter is typically near the device name, encoded as 0x10 + byte
-        for i in 9..<(data.count - 20) {
-            if data[i] == 0x10 {
-                let currentCounter = Int(data[i + 1])
-                return makeVectorClock(device: "Bear CLI", counter: currentCounter + 1)
-            }
-        }
+        let currentCounter = (dict["Bear CLI"] as? Int) ?? 0
+        dict["Bear CLI"] = currentCounter + 1
 
-        return makeVectorClock(device: "Bear CLI", counter: 1)
+        guard let newData = try? PropertyListSerialization.data(
+            fromPropertyList: dict, format: .binary, options: 0
+        ) else {
+            return makeVectorClock(device: "Bear CLI", counter: 1)
+        }
+        return newData.base64EncodedString()
     }
 
     // MARK: - Zone Changes (incremental sync)
