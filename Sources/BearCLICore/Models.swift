@@ -126,6 +126,7 @@ public struct CKRecord: Decodable {
         deleted = try container.decodeIfPresent(Bool.self, forKey: .deleted)
     }
 
+
     public init(
         recordName: String,
         recordType: String? = nil,

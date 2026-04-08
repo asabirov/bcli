@@ -309,6 +309,12 @@ public struct CloudKitAPI {
         let todoCompletedCount = newText.components(separatedBy: "- [x]").count - 1
         let todoIncompletedCount = newText.components(separatedBy: "- [ ]").count - 1
 
+        // Preserve existing field values from the record for fields Bear desktop
+        // may require to properly process the sync update
+        let existingVersion = record.fields["version"]?.value.intValue ?? 3
+        let existingUniqueID = record.fields["uniqueIdentifier"]?.value.stringValue
+            ?? record.recordName
+
         let fields: [String: AnyCodableValue] = [
             "textADP": .dictionary([
                 "value": .string(newText),
@@ -346,6 +352,14 @@ public struct CloudKitAPI {
             ]),
             "text": .dictionary([
                 "value": .null,
+                "type": .string("STRING"),
+            ]),
+            "version": .dictionary([
+                "value": .int(existingVersion),
+                "type": .string("INT64"),
+            ]),
+            "uniqueIdentifier": .dictionary([
+                "value": .string(existingUniqueID),
                 "type": .string("STRING"),
             ]),
         ]
