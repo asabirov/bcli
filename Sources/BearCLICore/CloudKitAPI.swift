@@ -358,6 +358,10 @@ public struct CloudKitAPI {
                 "value": .string(existingUniqueID),
                 "type": .string("STRING"),
             ]),
+            "text": .dictionary([
+                "value": .null,
+                "type": .string("STRING"),
+            ]),
         ]
 
         var recordDict: [String: AnyCodableValue] = [
