@@ -309,6 +309,12 @@ public struct CloudKitAPI {
         let todoCompletedCount = newText.components(separatedBy: "- [x]").count - 1
         let todoIncompletedCount = newText.components(separatedBy: "- [ ]").count - 1
 
+        // Preserve existing field values from the record for fields Bear desktop
+        // may require to properly process the sync update
+        let existingVersion = record.fields["version"]?.value.intValue ?? 3
+        let existingUniqueID = record.fields["uniqueIdentifier"]?.value.stringValue
+            ?? record.recordName
+
         let fields: [String: AnyCodableValue] = [
             "textADP": .dictionary([
                 "value": .string(newText),
@@ -344,8 +350,12 @@ public struct CloudKitAPI {
                 "value": .int(Int64(todoIncompletedCount)),
                 "type": .string("INT64"),
             ]),
-            "text": .dictionary([
-                "value": .null,
+            "version": .dictionary([
+                "value": .int(existingVersion),
+                "type": .string("INT64"),
+            ]),
+            "uniqueIdentifier": .dictionary([
+                "value": .string(existingUniqueID),
                 "type": .string("STRING"),
             ]),
         ]
@@ -545,22 +555,26 @@ public struct CloudKitAPI {
 
     /// Increment the "Bear CLI" counter in an existing vector clock, preserving all other device entries.
     private func incrementVectorClock(_ base64: String) -> String {
-        guard let data = Data(base64Encoded: base64),
-              var dict = (try? PropertyListSerialization.propertyList(
-                  from: data, options: [], format: nil
-              )) as? [String: Any] else {
+        // The clock is a bplist with {"Device Name": counter}.
+        // We create a new clock with "Bear CLI" and counter = extracted + 1.
+        // If we can't parse the existing clock, preserve it unchanged to avoid
+        // creating a conflict that causes Bear desktop to reject the update.
+        guard let data = Data(base64Encoded: base64), data.count > 20 else {
             return makeVectorClock(device: "Bear CLI", counter: 1)
         }
 
-        let currentCounter = (dict["Bear CLI"] as? Int) ?? 0
-        dict["Bear CLI"] = currentCounter + 1
-
-        guard let newData = try? PropertyListSerialization.data(
-            fromPropertyList: dict, format: .binary, options: 0
-        ) else {
-            return makeVectorClock(device: "Bear CLI", counter: 1)
+        // Try to find the counter byte (it follows 0x10 pattern)
+        // The counter is typically near the device name, encoded as 0x10 + byte
+        for i in 9..<(data.count - 20) {
+            if data[i] == 0x10 {
+                let currentCounter = Int(data[i + 1])
+                return makeVectorClock(device: "Bear CLI", counter: currentCounter + 1)
+            }
         }
-        return newData.base64EncodedString()
+
+        // Could not parse the clock — return it unchanged rather than resetting
+        // to counter=1, which would look like a conflict to other Bear clients
+        return base64
     }
 
     // MARK: - Zone Changes (incremental sync)
